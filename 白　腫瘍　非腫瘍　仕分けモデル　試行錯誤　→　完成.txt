@@ -1,0 +1,95 @@
+
+
+
+import math
+import uuid
+
+import numpy as np
+import PIL.Image
+import PIL.ImageDraw
+
+from labelme.logger import logger
+import json
+
+
+
+#　JSONファイルからマスク画像へと変換する関数の定義
+def shape_to_mask(
+    img_shape, points, shape_type=None, line_width=10, point_size=5
+):
+    mask = np.zeros(img_shape[:2], dtype=np.uint8)
+    mask = PIL.Image.fromarray(mask)
+    draw = PIL.ImageDraw.Draw(mask)
+    xy = [tuple(point) for point in points]
+    if shape_type == "circle":
+        assert len(xy) == 2, "Shape of shape_type=circle must have 2 points"
+        (cx, cy), (px, py) = xy
+        d = math.sqrt((cx - px) ** 2 + (cy - py) ** 2)
+        draw.ellipse([cx - d, cy - d, cx + d, cy + d], outline=1, fill=1)
+    elif shape_type == "rectangle":
+        assert len(xy) == 2, "Shape of shape_type=rectangle must have 2 points"
+        draw.rectangle(xy, outline=1, fill=1)
+    elif shape_type == "line":
+        assert len(xy) == 2, "Shape of shape_type=line must have 2 points"
+        draw.line(xy=xy, fill=1, width=line_width)
+    elif shape_type == "linestrip":
+        draw.line(xy=xy, fill=1, width=line_width)
+    elif shape_type == "point":
+        assert len(xy) == 1, "Shape of shape_type=point must have 1 points"
+        cx, cy = xy[0]
+        r = point_size
+        draw.ellipse([cx - r, cy - r, cx + r, cy + r], outline=1, fill=1)
+    else:
+        assert len(xy) > 2, "Polygon must have points more than 2"
+        draw.polygon(xy=xy, outline=1, fill=1)
+    mask = np.array(mask, dtype=bool)
+    return mask
+
+
+
+#下記4行でJSONファイルからアノテーション画像を生成（マスク画像：バイナリデータへとパース）
+with open(r"C:\Users\compa\daityo_byori_sikousakugo\test_divided_image\111HE1_13.json") as f:
+    dj = json.load(f)
+mask = shape_to_mask((dj['imageHeight'],dj['imageWidth']), dj['shapes'][0]['points'], shape_type=None,line_width=1, point_size=1)
+mask_img = mask.astype(np.int)
+
+
+#アノテーション前の元画像
+img=cv2.imread(r"C:\Users\compa\daityo_byori_sikousakugo\test_divided_image\111HE1_13.png")
+
+size=2000
+#　.shapeでアノテートしたデータが取り出せるので(高さ、幅)それを変数に入れる
+height,width = mask_img.shape
+#割り切れる数に調整。最初から割り切れるものであれば余計な手間だが。
+height = height // size * size
+width = width // size * size
+#何個に分割するかを変数に入れる
+height_split = height//size
+width_split = width//size
+#　新しいイメージの高さ、幅を変数に入れる(基本的にはsizeと一緒になる)
+new_img_height = int(height / height_split)
+new_img_width = int(width / width_split)
+#分割の後画像に名前を付けて書き出す
+for h in range(height_split):
+    height_start = h * new_img_height
+    height_end = height_start + new_img_height
+    for w in range(width_split):
+        width_start = w * new_img_width
+        width_end = width_start + new_img_width
+        clp = mask_img[height_start:height_end, width_start:width_end]
+        clp_mean=np.mean(clp)
+        dlp=img[height_start:height_end, width_start:width_end]
+        dlp_mean=np.mean(dlp)
+        #まず背景が白い画像を省く。　閾値を調整すれば、どれくらいの白い画像を省けるかを調整できる。ひとまず２２０にした。
+        if dlp_mean>220:
+            continue
+        #マスクされた腫瘍を　tumorフォルダへ格納
+        if clp_mean==0:
+            file_name = "no_tumor" + str(h) + "_" + str(w) + ".png"
+            folded = r"C:\Users\compa\daityo_byori_sikousakugo\tumor_or_nontumor\no_tumor"
+            cv2.imwrite(folded+"/" + file_name, dlp)
+        #マスクされてない非腫瘍を　no_tumorフォルダへ格納
+        else:
+            file_name = "tumor" + str(h) + "_" + str(w) + ".png"
+            folded = r"C:\Users\compa\daityo_byori_sikousakugo\tumor_or_nontumor\tumor"
+            cv2.imwrite(folded+"/" + file_name, dlp)
